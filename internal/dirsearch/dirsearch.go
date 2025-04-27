@@ -1,0 +1,136 @@
+// dirsearch/dirsearch.go
+package dirsearch
+
+import (
+	"flag"
+	"fmt"
+	"os"
+	"path/filepath"
+	"slices"
+	"strings"
+)
+
+// DirSearchOptions defines search configuration options
+type DirSearchOptions struct {
+	SearchPattern  string
+	StartDir       string
+	CaseSensitive  bool
+	IgnorePatterns []string
+}
+
+// Result contains search results
+type Result struct {
+	Directories []string
+	Error       error
+}
+
+// DefaultOptions returns the default search options
+func DefaultOptions() *DirSearchOptions {
+	return &DirSearchOptions{
+		SearchPattern:  "",
+		StartDir:       ".",
+		CaseSensitive:  false,
+		IgnorePatterns: []string{"node_modules"},
+	}
+}
+
+// NewOptionsFromFlags creates DirSearchOptions from command-line flags
+func NewOptionsFromFlags() *DirSearchOptions {
+	opts := DefaultOptions()
+
+	searchPattern := flag.String("name", "", "Search pattern for directory names")
+	startDir := flag.String("dir", ".", "Starting directory for search")
+	caseSensitive := flag.Bool("case-sensitive", false, "Enable case-sensitive search")
+
+	flag.Parse()
+
+	// Check if name flag was explicitly provided
+	flag.Visit(func(f *flag.Flag) {
+		if f.Name == "name" {
+			opts.SearchPattern = *searchPattern
+		}
+	})
+
+	opts.StartDir = *startDir
+	opts.CaseSensitive = *caseSensitive
+
+	return opts
+}
+
+// Search performs directory search with the given options
+func Search(opts *DirSearchOptions) Result {
+	var foundDirs []string
+	var searchErr error
+
+	// Prepare pattern for search
+	var pattern string
+	if opts.CaseSensitive {
+		pattern = opts.SearchPattern
+	} else {
+		pattern = strings.ToLower(opts.SearchPattern)
+	}
+
+	// Check if we're actually filtering by name
+	nameProvided := opts.SearchPattern != ""
+
+	// Walk through all directories
+	searchErr = filepath.Walk(opts.StartDir, func(path string, info os.FileInfo, err error) error {
+		if err != nil {
+			return filepath.SkipDir
+		}
+
+		// Skip ignored directories
+		if info.IsDir() {
+			if slices.Contains(opts.IgnorePatterns, info.Name()) {
+				return filepath.SkipDir
+			}
+		}
+
+		// If it's a directory and matches our pattern (if provided)
+		if info.IsDir() {
+			var matches bool
+			if !nameProvided {
+				matches = true
+			} else if opts.CaseSensitive {
+				matches = strings.Contains(info.Name(), pattern)
+			} else {
+				matches = strings.Contains(strings.ToLower(info.Name()), pattern)
+			}
+
+			if matches {
+				// Get path relative to starting directory
+				relativePath, err := filepath.Rel(opts.StartDir, path)
+				if err != nil {
+					relativePath = path
+				}
+				if relativePath == "." {
+					return nil // Skip adding the starting directory itself
+				}
+
+				// Add to our slice
+				foundDirs = append(foundDirs, relativePath)
+			}
+		}
+
+		return nil
+	})
+
+	return Result{
+		Directories: foundDirs,
+		Error:       searchErr,
+	}
+}
+
+// PrintResults prints the search results in a formatted way
+func PrintResults(result Result) {
+	if result.Error != nil {
+		fmt.Printf("Error walking directory: %v\n", result.Error)
+		return
+	}
+
+	fmt.Printf("Found %d directories:\n", len(result.Directories))
+	for i, dir := range result.Directories {
+		fmt.Printf("%d. %s\n", i+1, dir)
+	}
+
+}
