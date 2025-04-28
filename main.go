@@ -4,25 +4,32 @@ import (
 	"fmt"
 	"os"
 
-	"github.com/kaczmarekdaniel/folder-search/internal/dirsearch"
+	"github.com/kaczmarekdaniel/folder-search/internal/app"
 	"github.com/kaczmarekdaniel/folder-search/internal/ui"
 )
 
 func main() {
-	opts := dirsearch.NewOptionsFromFlags()
+	app, err := app.NewApplication()
+	if err != nil {
+		os.Exit(1)
 
-	fmt.Printf("Searching directories in: %s\n", opts.StartDir)
-	if opts.SearchPattern == "" {
-		fmt.Println("No name pattern provided. Showing all directories.")
 	}
-	fmt.Printf("Ignoring directories: %v\n", opts.IgnorePatterns)
 
-	result := dirsearch.Search(opts)
+	result := app.Dirsearch.ScanDirs()
 
 	if result.Error != nil {
 		fmt.Printf("Error: %v\n", result.Error)
 		os.Exit(1)
 	}
 
-	ui.Print(result.Directories, opts.SearchPattern)
+	ui.Print(result.Directories, "123321")
+
 }
+
+//  Create app struct, but what should it do?
+//   - hold references to search (rename it) and ui
+//   - make sure it's initialised only once
+//
+//  How flow should look like?
+//   -> main func is called -> read flags from command -> pass search in folder func & options from flags to ui ->
+//   ui then calls search on folder X when needed

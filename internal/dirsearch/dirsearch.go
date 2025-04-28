@@ -10,7 +10,20 @@ import (
 	"strings"
 )
 
-// DirSearchOptions defines search configuration options
+type DirSearch struct {
+	Options *DirSearchOptions
+}
+
+func NewDirSearchType() *DirSearch {
+	return &DirSearch{
+		Options: DefaultOptions(),
+	}
+}
+
+func (d *DirSearch) ScanDirs() Result {
+	return Search(d.Options)
+}
+
 type DirSearchOptions struct {
 	SearchPattern  string
 	StartDir       string
@@ -34,7 +47,6 @@ func DefaultOptions() *DirSearchOptions {
 	}
 }
 
-// NewOptionsFromFlags creates DirSearchOptions from command-line flags
 func NewOptionsFromFlags() *DirSearchOptions {
 	opts := DefaultOptions()
 
@@ -44,7 +56,6 @@ func NewOptionsFromFlags() *DirSearchOptions {
 
 	flag.Parse()
 
-	// Check if name flag was explicitly provided
 	flag.Visit(func(f *flag.Flag) {
 		if f.Name == "name" {
 			opts.SearchPattern = *searchPattern
@@ -58,6 +69,7 @@ func NewOptionsFromFlags() *DirSearchOptions {
 }
 
 // Search performs directory search with the given options
+// func (wh *WorkoutHandler) HandleGetWorkoutByID(w http.ResponseWriter, r *http.Request) {
 func Search(opts *DirSearchOptions) Result {
 	var foundDirs []string
 	var searchErr error
@@ -70,20 +82,26 @@ func Search(opts *DirSearchOptions) Result {
 		pattern = strings.ToLower(opts.SearchPattern)
 	}
 
-	// Check if we're actually filtering by name
 	nameProvided := opts.SearchPattern != ""
 
 	// Walk through all directories
-	searchErr = filepath.Walk(opts.StartDir, func(path string, info os.FileInfo, err error) error {
+	searchErr = filepath.WalkDir(opts.StartDir, func(path string, info os.DirEntry, err error) error {
 		if err != nil {
 			return filepath.SkipDir
 		}
 
-		// Skip ignored directories
 		if info.IsDir() {
+
+			matched := strings.HasPrefix(info.Name(), ".git")
+
+			if matched {
+				return filepath.SkipDir
+			}
+
 			if slices.Contains(opts.IgnorePatterns, info.Name()) {
 				return filepath.SkipDir
 			}
+
 		}
 
 		// If it's a directory and matches our pattern (if provided)
@@ -134,3 +152,4 @@ func PrintResults(result Result) {
 	}
 
 }
+
