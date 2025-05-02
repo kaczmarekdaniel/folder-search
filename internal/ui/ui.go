@@ -4,13 +4,15 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/rand"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
+	"github.com/kaczmarekdaniel/folder-search/internal/app"
+	"github.com/kaczmarekdaniel/folder-search/internal/dirsearch"
 )
 
 var (
@@ -26,15 +28,19 @@ var (
 type item string
 
 type model struct {
-	sub       chan int
-	list      list.Model
-	choice    string
-	quitting  bool
-	responses int
+	requestChan chan string
+	resultChan  chan dirsearch.Result
+	list        list.Model
+	choice      string
+	quitting    bool
+	responses   int
+	search      func(dir string) dirsearch.Result
+	prevDir     string
+	currentDir  string
 }
 
 type responseMsg struct {
-	RandomNumber int
+	result dirsearch.Result
 }
 
 type itemDelegate struct{}
@@ -68,17 +74,23 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	fmt.Fprint(w, fn(str))
 }
 
-func waitForActivity(sub chan int) tea.Cmd {
+func scanInBackground(requestChan chan string, resultChan chan dirsearch.Result, searchFunc func(dir string) dirsearch.Result) {
+	for dir := range requestChan {
+		result := searchFunc(dir)
+		resultChan <- result
+	}
+}
+
+func waitForResults(resultChan chan dirsearch.Result) tea.Cmd {
 	return func() tea.Msg {
-		num := <-sub
-		return responseMsg{RandomNumber: num}
+		result := <-resultChan
+		return responseMsg{result: result}
 	}
 }
 
 func (m model) Init() tea.Cmd {
-	return tea.Batch(
-		waitForActivity(m.sub),
-	)
+	m.requestChan <- m.currentDir
+	return waitForResults(m.resultChan)
 }
 
 // Update handles different types of events around the list and returns an updated model and command.
@@ -86,7 +98,8 @@ func (m model) Init() tea.Cmd {
 // It processes window size changes, keyboard events, and response messages using nested
 // switch statements. Specific key actions include:
 //   - q/ctrl+c: quit the application
-//   - right: send a random number to the subscription channel
+//   - right: enter the higlighted folder
+//   - left: go to parent folder
 //   - enter: select the current item and quit
 //
 // Response messages trigger addition of new items to the list.
@@ -101,8 +114,17 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			return m, tea.Quit
 		case "right":
-			randomNum := rand.Intn(1000)
-			m.sub <- randomNum
+
+			i, _ := m.list.SelectedItem().(item)
+			m.currentDir = m.currentDir + "/" + string(i)
+			// Send request to scan the new directory
+			m.requestChan <- m.currentDir
+		case "left":
+			parentDir := filepath.Dir(m.currentDir)
+			m.currentDir = parentDir
+			// Send request to scan the parent directory
+			m.requestChan <- m.currentDir
+
 		case "enter":
 			i, ok := m.list.SelectedItem().(item)
 			if ok {
@@ -111,23 +133,23 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		}
 	case responseMsg:
-
-		i, _ := m.list.SelectedItem().(item)
-
-		newFolderItems := []string{string(i)}
-		m.list.SetItems(stringsToItems(newFolderItems))
-
-		height := int(math.Min(float64(len(newFolderItems)+6), 24))
-		m.list.SetHeight(height)
-
-		return m, waitForActivity(m.sub)
+		result := msg.result
+		if result.Error == nil {
+			m.list.SetItems(stringsToItems(result.Directories))
+			height := int(math.Min(float64(len(result.Directories)+8), 24))
+			m.list.SetHeight(height)
+		}
+		return m, waitForResults(m.resultChan)
 	}
+
 	var cmd tea.Cmd
 	m.list, cmd = m.list.Update(msg)
 	return m, cmd
 }
 
 func (m model) View() string {
+	m.list.Title = m.currentDir
+
 	if m.choice != "" {
 		return quitTextStyle.Render(fmt.Sprintf("%s? Sounds good to me.", m.choice))
 	}
@@ -142,23 +164,43 @@ func (m model) View() string {
 	return header + listView + footer
 }
 
-func Print(stringList []string, title string) {
-	const defaultWidth = 20
-	items := stringsToItems(stringList)
-	height := int(math.Min(float64(len(items)+6), 64))
-	l := list.New(items, itemDelegate{}, defaultWidth, height)
-	if title == "" {
-		l.Title = "Searching in a filetree"
-	} else {
-		l.Title = title
+func InitUI(app *app.Application) {
+	result := app.Dirsearch.ScanDirs(".")
+	const title = ""
+	if result.Error != nil {
+		fmt.Printf("Error: %v\n", result.Error)
+		os.Exit(1)
 	}
+
+	const defaultWidth = 20
+	items := stringsToItems(result.Directories)
+	height := int(math.Min(float64(len(items)+8), 64))
+	l := list.New(items, itemDelegate{}, defaultWidth, height)
+	l.Title = title
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = helpStyle
 
-	m := model{list: l, sub: make(chan int)}
+	currentDir, err := os.Getwd()
+	if err != nil {
+		fmt.Printf("Error getting current directory: %v\n", err)
+		return
+	}
+
+	requestChan := make(chan string)
+	resultChan := make(chan dirsearch.Result)
+
+	go scanInBackground(requestChan, resultChan, app.Dirsearch.ScanDirs)
+
+	m := model{
+		list:        l,
+		currentDir:  currentDir,
+		requestChan: requestChan,
+		resultChan:  resultChan,
+		search:      app.Dirsearch.ScanDirs,
+	}
 
 	if _, err := tea.NewProgram(m).Run(); err != nil {
 		fmt.Println("Error running program:", err)

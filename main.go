@@ -1,7 +1,6 @@
 package main
 
 import (
-	"fmt"
 	"os"
 
 	"github.com/kaczmarekdaniel/folder-search/internal/app"
@@ -15,14 +14,7 @@ func main() {
 
 	}
 
-	result := app.Dirsearch.ScanDirs()
-
-	if result.Error != nil {
-		fmt.Printf("Error: %v\n", result.Error)
-		os.Exit(1)
-	}
-
-	ui.Print(result.Directories, "123321")
+	ui.InitUI(app)
 
 }
 

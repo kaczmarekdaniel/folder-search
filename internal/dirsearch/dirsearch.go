@@ -20,7 +20,8 @@ func NewDirSearchType() *DirSearch {
 	}
 }
 
-func (d *DirSearch) ScanDirs() Result {
+func (d *DirSearch) ScanDirs(dir string) Result {
+	d.Options.StartDir = dir
 	return Search(d.Options)
 }
 
@@ -29,6 +30,10 @@ type DirSearchOptions struct {
 	StartDir       string
 	CaseSensitive  bool
 	IgnorePatterns []string
+}
+
+type TSearch interface {
+	Search() Result
 }
 
 // Result contains search results
@@ -73,7 +78,6 @@ func NewOptionsFromFlags() *DirSearchOptions {
 func Search(opts *DirSearchOptions) Result {
 	var foundDirs []string
 	var searchErr error
-
 	// Prepare pattern for search
 	var pattern string
 	if opts.CaseSensitive {
@@ -116,13 +120,16 @@ func Search(opts *DirSearchOptions) Result {
 			}
 
 			if matches {
-				// Get path relative to starting directory
 				relativePath, err := filepath.Rel(opts.StartDir, path)
 				if err != nil {
 					relativePath = path
 				}
 				if relativePath == "." {
-					return nil // Skip adding the starting directory itself
+					return nil
+				}
+
+				if strings.Contains(relativePath, "/") {
+					return nil
 				}
 
 				// Add to our slice
