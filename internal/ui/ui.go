@@ -34,6 +34,7 @@ type model struct {
 	list        list.Model
 	choice      string
 	quitting    bool
+	showSaved   bool
 	responses   int
 	search      func(dir string) dirsearch.Result
 	prevDir     string
@@ -65,6 +66,7 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	if !ok {
 		return
 	}
+
 	str := fmt.Sprintf("%d. %s", index+1, i)
 	fn := itemStyle.Render
 	if index == m.Index() {
@@ -127,10 +129,15 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.requestChan <- m.currentDir
 
 		case "s":
-			parentDir := filepath.Dir(m.currentDir)
-			m.currentDir = parentDir
-			// Send request to scan the parent directory
+
+			m.showSaved = false
 			m.requestChan <- m.currentDir
+
+		case "f":
+
+			items := []list.Item{}
+			m.showSaved = true
+			m.list.SetItems(items)
 
 		case "enter":
 			i, ok := m.list.SelectedItem().(item)
@@ -141,7 +148,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 	case responseMsg:
 		result := msg.result
-		if result.Error == nil {
+		if result.Error == nil && !m.showSaved {
 			m.list.SetItems(stringsToItems(result.Directories))
 			height := int(math.Min(float64(len(result.Directories)+8), 24))
 			m.list.SetHeight(height)
@@ -168,19 +175,30 @@ func (m model) View() string {
 		key.WithKeys("s"),
 		key.WithHelp("s", "save path"),
 	)
-	favourites := key.NewBinding(
+
+	savedPathsText := "saved paths"
+	if m.showSaved {
+		savedPathsText = "show results"
+	}
+
+	saved := key.NewBinding(
 		key.WithKeys("f"),
-		key.WithHelp("f", "search"),
+		key.WithHelp("f", savedPathsText),
+	)
+
+	gotofolder := key.NewBinding(
+		key.WithKeys("enter"),
+		key.WithHelp("enter", "open"),
 	)
 
 	m.list.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{save, favourites}
+		return []key.Binding{save, saved, gotofolder}
 	}
 
+	header := fmt.Sprintf("show saved? %t ", m.showSaved)
 	listView := m.list.View()
-	footer := "\n Press q to exit\n"
 
-	return listView + footer
+	return header + listView
 }
 
 func InitUI(app *app.Application) {
