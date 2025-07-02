@@ -8,6 +8,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/charmbracelet/bubbles/key"
 	"github.com/charmbracelet/bubbles/list"
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/charmbracelet/lipgloss"
@@ -125,6 +126,12 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			// Send request to scan the parent directory
 			m.requestChan <- m.currentDir
 
+		case "s":
+			parentDir := filepath.Dir(m.currentDir)
+			m.currentDir = parentDir
+			// Send request to scan the parent directory
+			m.requestChan <- m.currentDir
+
 		case "enter":
 			i, ok := m.list.SelectedItem().(item)
 			if ok {
@@ -151,17 +158,29 @@ func (m model) View() string {
 	m.list.Title = m.currentDir
 
 	if m.choice != "" {
-		return quitTextStyle.Render(fmt.Sprintf("%s? Sounds good to me.", m.choice))
+		return quitTextStyle.Render(fmt.Sprintf("%s? navigating to %s", m.choice, m.choice))
 	}
 	if m.quitting {
-		return quitTextStyle.Render("Not hungry? That's cool.")
+		return quitTextStyle.Render("See ya later, aligator")
 	}
 
-	header := fmt.Sprintf("\n Events received: %d\n", m.responses)
+	save := key.NewBinding(
+		key.WithKeys("s"),
+		key.WithHelp("s", "save path"),
+	)
+	favourites := key.NewBinding(
+		key.WithKeys("f"),
+		key.WithHelp("f", "search"),
+	)
+
+	m.list.AdditionalShortHelpKeys = func() []key.Binding {
+		return []key.Binding{save, favourites}
+	}
+
 	listView := m.list.View()
 	footer := "\n Press q to exit\n"
 
-	return header + listView + footer
+	return listView + footer
 }
 
 func InitUI(app *app.Application) {
@@ -182,6 +201,7 @@ func InitUI(app *app.Application) {
 	l.Styles.Title = titleStyle
 	l.Styles.PaginationStyle = paginationStyle
 	l.Styles.HelpStyle = helpStyle
+	// l.SetFilterText("")
 
 	currentDir, err := os.Getwd()
 	if err != nil {
