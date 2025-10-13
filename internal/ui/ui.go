@@ -1,8 +1,19 @@
+// Package ui implements the terminal user interface using the Bubble Tea framework.
+//
+// This package provides an interactive directory browser that allows users to:
+//   - Navigate through directory hierarchies
+//   - View directory contents in real-time
+//   - Select directories with keyboard navigation
+//   - Handle errors gracefully with user-friendly messages
+//
+// The UI runs asynchronously, scanning directories in the background without
+// blocking user interaction.
 package ui
 
 import (
 	"fmt"
 	"io"
+	"log/slog"
 	"math"
 	"os"
 	"path/filepath"
@@ -16,13 +27,30 @@ import (
 	"github.com/kaczmarekdaniel/folder-search/internal/dirsearch"
 )
 
+const (
+	// UI dimension constants
+	defaultListWidth      = 20
+	listHeightPadding     = 8
+	maxListHeight         = 64
+	maxDynamicListHeight  = 24
+
+	// Style constants
+	titleMarginLeft       = 2
+	itemPaddingLeft       = 4
+	selectedItemPadding   = 2
+	quitTextTopMargin     = 1
+	quitTextBottomMargin  = 2
+	quitTextLeftMargin    = 4
+	helpBottomPadding     = 1
+)
+
 var (
-	titleStyle        = lipgloss.NewStyle().MarginLeft(2)
-	itemStyle         = lipgloss.NewStyle().PaddingLeft(4)
-	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(2).Foreground(lipgloss.Color("170"))
-	paginationStyle   = list.DefaultStyles().PaginationStyle.PaddingLeft(4)
-	helpStyle         = list.DefaultStyles().HelpStyle.PaddingLeft(4).PaddingBottom(1)
-	quitTextStyle     = lipgloss.NewStyle().Margin(1, 0, 2, 4)
+	titleStyle        = lipgloss.NewStyle().MarginLeft(titleMarginLeft)
+	itemStyle         = lipgloss.NewStyle().PaddingLeft(itemPaddingLeft)
+	selectedItemStyle = lipgloss.NewStyle().PaddingLeft(selectedItemPadding).Foreground(lipgloss.Color("170"))
+	paginationStyle   = list.DefaultStyles().PaginationStyle.PaddingLeft(itemPaddingLeft)
+	helpStyle         = list.DefaultStyles().HelpStyle.PaddingLeft(itemPaddingLeft).PaddingBottom(helpBottomPadding)
+	quitTextStyle     = lipgloss.NewStyle().Margin(quitTextTopMargin, 0, quitTextBottomMargin, quitTextLeftMargin)
 )
 
 // Types
@@ -31,14 +59,16 @@ type item string
 type model struct {
 	requestChan chan string
 	resultChan  chan dirsearch.Result
+	doneChan    chan struct{}
 	list        list.Model
 	choice      string
 	quitting    bool
-	showSaved   bool
 	responses   int
 	search      func(dir string) dirsearch.Result
 	prevDir     string
 	currentDir  string
+	err         error
+	logger      *slog.Logger
 }
 
 type responseMsg struct {
@@ -77,16 +107,33 @@ func (d itemDelegate) Render(w io.Writer, m list.Model, index int, listItem list
 	fmt.Fprint(w, fn(str))
 }
 
-func scanInBackground(requestChan chan string, resultChan chan dirsearch.Result, searchFunc func(dir string) dirsearch.Result) {
-	for dir := range requestChan {
-		result := searchFunc(dir)
-		resultChan <- result
+func scanInBackground(requestChan chan string, resultChan chan dirsearch.Result, doneChan chan struct{}, searchFunc func(dir string) dirsearch.Result) {
+	for {
+		select {
+		case <-doneChan:
+			close(requestChan)
+			close(resultChan)
+			return
+		case dir := <-requestChan:
+			result := searchFunc(dir)
+			select {
+			case resultChan <- result:
+			case <-doneChan:
+				close(requestChan)
+				close(resultChan)
+				return
+			}
+		}
 	}
 }
 
 func waitForResults(resultChan chan dirsearch.Result) tea.Cmd {
 	return func() tea.Msg {
-		result := <-resultChan
+		result, ok := <-resultChan
+		if !ok {
+			// Channel closed, return empty result
+			return responseMsg{result: dirsearch.Result{}}
+		}
 		return responseMsg{result: result}
 	}
 }
@@ -114,43 +161,40 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 	case tea.KeyMsg:
 		switch keypress := msg.String(); keypress {
 		case "q", "ctrl+c":
+			m.logger.Info("user quit application")
 			m.quitting = true
+			close(m.doneChan)
 			return m, tea.Quit
 		case "right":
-
 			i, _ := m.list.SelectedItem().(item)
 			m.currentDir = m.currentDir + "/" + string(i)
+			m.logger.Debug("navigating into directory", "dir", m.currentDir)
 			// Send request to scan the new directory
 			m.requestChan <- m.currentDir
 		case "left":
 			parentDir := filepath.Dir(m.currentDir)
 			m.currentDir = parentDir
+			m.logger.Debug("navigating to parent directory", "dir", m.currentDir)
 			// Send request to scan the parent directory
 			m.requestChan <- m.currentDir
-
-		case "s":
-
-			m.showSaved = false
-			m.requestChan <- m.currentDir
-
-		case "f":
-
-			items := []list.Item{}
-			m.showSaved = true
-			m.list.SetItems(items)
-
 		case "enter":
 			i, ok := m.list.SelectedItem().(item)
 			if ok {
 				m.choice = string(i)
 			}
+			close(m.doneChan)
 			return m, tea.Quit
 		}
 	case responseMsg:
 		result := msg.result
-		if result.Error == nil && !m.showSaved {
+		if result.Error != nil {
+			m.logger.Error("directory scan failed", "error", result.Error, "dir", m.currentDir)
+			m.err = result.Error
+		} else {
+			m.logger.Debug("directory scan completed", "dir", m.currentDir, "count", len(result.Directories))
+			m.err = nil
 			m.list.SetItems(stringsToItems(result.Directories))
-			height := int(math.Min(float64(len(result.Directories)+8), 24))
+			height := int(math.Min(float64(len(result.Directories)+listHeightPadding), maxDynamicListHeight))
 			m.list.SetHeight(height)
 		}
 		return m, waitForResults(m.resultChan)
@@ -171,48 +215,70 @@ func (m model) View() string {
 		return quitTextStyle.Render("See ya later, aligator")
 	}
 
-	save := key.NewBinding(
-		key.WithKeys("s"),
-		key.WithHelp("s", "save path"),
-	)
-
-	savedPathsText := "saved paths"
-	if m.showSaved {
-		savedPathsText = "show results"
+	// Display error if present
+	if m.err != nil {
+		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Margin(1, 2)
+		return errorStyle.Render(fmt.Sprintf("Error: %v\nPress q to quit", m.err))
 	}
 
-	saved := key.NewBinding(
-		key.WithKeys("f"),
-		key.WithHelp("f", savedPathsText),
-	)
-
-	gotofolder := key.NewBinding(
+	enter := key.NewBinding(
 		key.WithKeys("enter"),
 		key.WithHelp("enter", "open"),
 	)
 
+	left := key.NewBinding(
+		key.WithKeys("left", "h"),
+		key.WithHelp("←/h", "parent dir"),
+	)
+
+	right := key.NewBinding(
+		key.WithKeys("right", "l"),
+		key.WithHelp("→/l", "enter dir"),
+	)
+
 	m.list.AdditionalShortHelpKeys = func() []key.Binding {
-		return []key.Binding{save, saved, gotofolder}
+		return []key.Binding{left, right, enter}
 	}
 
-	header := fmt.Sprintf("show saved? %t ", m.showSaved)
-	listView := m.list.View()
-
-	return header + listView
+	return m.list.View()
 }
 
-func InitUI(app *app.Application) {
+// InitUI initializes and runs the terminal user interface.
+//
+// This function:
+//   1. Performs an initial directory scan of the current directory
+//   2. Sets up the Bubble Tea list component with the results
+//   3. Creates background goroutines for async directory scanning
+//   4. Starts the Bubble Tea event loop
+//   5. Blocks until the user quits the application
+//
+// The UI provides keyboard controls for navigation:
+//   - Up/Down or j/k: Navigate through directories
+//   - Right or l: Enter selected directory
+//   - Left or h: Go to parent directory
+//   - Enter: Select directory and exit
+//   - q or Ctrl+C: Quit application
+//
+// Parameters:
+//   - app: The application instance containing the directory searcher and logger
+//
+// Returns an error if:
+//   - Initial directory scan fails
+//   - Current working directory cannot be determined
+//   - Bubble Tea program encounters an error
+func InitUI(app *app.Application) error {
+	app.Logger.Info("initializing UI")
 	result := app.Dirsearch.ScanDirs(".")
 	const title = ""
 	if result.Error != nil {
-		fmt.Printf("Error: %v\n", result.Error)
-		os.Exit(1)
+		app.Logger.Error("initial directory scan failed", "error", result.Error)
+		return fmt.Errorf("initial directory scan failed: %w", result.Error)
 	}
+	app.Logger.Debug("initial scan completed", "count", len(result.Directories))
 
-	const defaultWidth = 20
 	items := stringsToItems(result.Directories)
-	height := int(math.Min(float64(len(items)+8), 64))
-	l := list.New(items, itemDelegate{}, defaultWidth, height)
+	height := int(math.Min(float64(len(items)+listHeightPadding), maxListHeight))
+	l := list.New(items, itemDelegate{}, defaultListWidth, height)
 	l.Title = title
 	l.SetShowStatusBar(false)
 	l.SetFilteringEnabled(false)
@@ -223,25 +289,30 @@ func InitUI(app *app.Application) {
 
 	currentDir, err := os.Getwd()
 	if err != nil {
-		fmt.Printf("Error getting current directory: %v\n", err)
-		return
+		return fmt.Errorf("failed to get current directory: %w", err)
 	}
 
 	requestChan := make(chan string)
 	resultChan := make(chan dirsearch.Result)
+	doneChan := make(chan struct{})
 
-	go scanInBackground(requestChan, resultChan, app.Dirsearch.ScanDirs)
+	go scanInBackground(requestChan, resultChan, doneChan, app.Dirsearch.ScanDirs)
 
 	m := model{
 		list:        l,
 		currentDir:  currentDir,
 		requestChan: requestChan,
 		resultChan:  resultChan,
+		doneChan:    doneChan,
 		search:      app.Dirsearch.ScanDirs,
+		logger:      app.Logger,
 	}
 
+	app.Logger.Info("starting UI event loop")
+
 	if _, err := tea.NewProgram(m).Run(); err != nil {
-		fmt.Println("Error running program:", err)
-		os.Exit(1)
+		return fmt.Errorf("failed to run UI program: %w", err)
 	}
+
+	return nil
 }
