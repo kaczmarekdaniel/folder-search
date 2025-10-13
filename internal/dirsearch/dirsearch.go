@@ -17,7 +17,7 @@ import (
 // It provides methods to scan directories and find matches based on specified criteria.
 type DirSearch struct {
 	// Options contains the configuration for search operations
-	Options *DirSearchOptions
+	Options *Options
 }
 
 // NewDirSearch creates a new DirSearch instance with default options.
@@ -47,8 +47,8 @@ func (d *DirSearch) ScanDirs(dir string) Result {
 	return Search(d.Options)
 }
 
-// DirSearchOptions configures the behavior of directory search operations.
-type DirSearchOptions struct {
+// Options configures the behavior of directory search operations.
+type Options struct {
 	// SearchPattern is the pattern to match against directory names.
 	// Empty string matches all directories.
 	SearchPattern string
@@ -74,13 +74,13 @@ type Result struct {
 
 // DefaultOptions returns the default search options.
 //
-// Returns DirSearchOptions configured with:
+// Returns Options configured with:
 //   - Empty search pattern (matches all)
 //   - Current directory as start directory
 //   - Case-insensitive matching
 //   - node_modules in ignore list
-func DefaultOptions() *DirSearchOptions {
-	return &DirSearchOptions{
+func DefaultOptions() *Options {
+	return &Options{
 		SearchPattern:  "",
 		StartDir:       ".",
 		CaseSensitive:  false,
@@ -105,7 +105,7 @@ func DefaultOptions() *DirSearchOptions {
 //   - opts: configuration options for the search
 //
 // Returns a Result with matching directories or an error.
-func Search(opts *DirSearchOptions) Result {
+func Search(opts *Options) Result {
 	var foundDirs []string
 	var searchErr error
 	// Prepare pattern for search
@@ -125,7 +125,6 @@ func Search(opts *DirSearchOptions) Result {
 		}
 
 		if info.IsDir() {
-
 			matched := strings.HasPrefix(info.Name(), ".git")
 
 			if matched {
@@ -135,7 +134,6 @@ func Search(opts *DirSearchOptions) Result {
 			if slices.Contains(opts.IgnorePatterns, info.Name()) {
 				return filepath.SkipDir
 			}
-
 		}
 
 		// If it's a directory and matches our pattern (if provided)
@@ -195,6 +193,4 @@ func PrintResults(result Result) {
 	for i, dir := range result.Directories {
 		fmt.Printf("%d. %s\n", i+1, dir)
 	}
-
 }
-

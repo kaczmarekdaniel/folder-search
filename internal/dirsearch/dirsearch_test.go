@@ -51,7 +51,7 @@ func TestSearch_EmptyDirectory(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -85,7 +85,7 @@ func TestSearch_WithSubdirectories(t *testing.T) {
 		}
 	}
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -131,7 +131,7 @@ func TestSearch_CaseSensitive(t *testing.T) {
 	}
 
 	t.Run("case-insensitive", func(t *testing.T) {
-		opts := &DirSearchOptions{
+		opts := &Options{
 			SearchPattern:  "test",
 			StartDir:       tempDir,
 			CaseSensitive:  false,
@@ -151,7 +151,7 @@ func TestSearch_CaseSensitive(t *testing.T) {
 	})
 
 	t.Run("case-sensitive", func(t *testing.T) {
-		opts := &DirSearchOptions{
+		opts := &Options{
 			SearchPattern:  "Test",
 			StartDir:       tempDir,
 			CaseSensitive:  true,
@@ -190,7 +190,7 @@ func TestSearch_IgnorePatterns(t *testing.T) {
 		}
 	}
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -231,7 +231,7 @@ func TestSearch_GitDirectoriesIgnored(t *testing.T) {
 		}
 	}
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -280,3 +280,4 @@ func TestScanDirs(t *testing.T) {
 		t.Errorf("expected StartDir to be updated to %q, got %q", tempDir, ds.Options.StartDir)
 	}
 }
+

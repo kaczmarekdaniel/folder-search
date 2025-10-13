@@ -29,19 +29,19 @@ import (
 
 const (
 	// UI dimension constants
-	defaultListWidth      = 20
-	listHeightPadding     = 8
-	maxListHeight         = 64
-	maxDynamicListHeight  = 24
+	defaultListWidth     = 20
+	listHeightPadding    = 8
+	maxListHeight        = 64
+	maxDynamicListHeight = 24
 
 	// Style constants
-	titleMarginLeft       = 2
-	itemPaddingLeft       = 4
-	selectedItemPadding   = 2
-	quitTextTopMargin     = 1
-	quitTextBottomMargin  = 2
-	quitTextLeftMargin    = 4
-	helpBottomPadding     = 1
+	titleMarginLeft      = 2
+	itemPaddingLeft      = 4
+	selectedItemPadding  = 2
+	quitTextTopMargin    = 1
+	quitTextBottomMargin = 2
+	quitTextLeftMargin   = 4
+	helpBottomPadding    = 1
 )
 
 var (
@@ -63,9 +63,7 @@ type model struct {
 	list        list.Model
 	choice      string
 	quitting    bool
-	responses   int
 	search      func(dir string) dirsearch.Result
-	prevDir     string
 	currentDir  string
 	err         error
 	logger      *slog.Logger
@@ -129,11 +127,7 @@ func scanInBackground(requestChan chan string, resultChan chan dirsearch.Result,
 
 func waitForResults(resultChan chan dirsearch.Result) tea.Cmd {
 	return func() tea.Msg {
-		result, ok := <-resultChan
-		if !ok {
-			// Channel closed, return empty result
-			return responseMsg{result: dirsearch.Result{}}
-		}
+		result := <-resultChan
 		return responseMsg{result: result}
 	}
 }
@@ -165,18 +159,21 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.quitting = true
 			close(m.doneChan)
 			return m, tea.Quit
-		case "right":
-			i, _ := m.list.SelectedItem().(item)
-			m.currentDir = m.currentDir + "/" + string(i)
-			m.logger.Debug("navigating into directory", "dir", m.currentDir)
-			// Send request to scan the new directory
-			m.requestChan <- m.currentDir
 		case "left":
 			parentDir := filepath.Dir(m.currentDir)
 			m.currentDir = parentDir
 			m.logger.Debug("navigating to parent directory", "dir", m.currentDir)
-			// Send request to scan the parent directory
+			m.err = nil
 			m.requestChan <- m.currentDir
+			return m, waitForResults(m.resultChan)
+		case "right":
+			if m.err == nil {
+				i, _ := m.list.SelectedItem().(item)
+				m.currentDir = m.currentDir + "/" + string(i)
+				m.logger.Debug("navigating into directory", "dir", m.currentDir)
+				m.requestChan <- m.currentDir
+				return m, waitForResults(m.resultChan)
+			}
 		case "enter":
 			i, ok := m.list.SelectedItem().(item)
 			if ok {
@@ -197,7 +194,7 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			height := int(math.Min(float64(len(result.Directories)+listHeightPadding), maxDynamicListHeight))
 			m.list.SetHeight(height)
 		}
-		return m, waitForResults(m.resultChan)
+		return m, nil
 	}
 
 	var cmd tea.Cmd
@@ -215,10 +212,10 @@ func (m model) View() string {
 		return quitTextStyle.Render("See ya later, aligator")
 	}
 
-	// Display error if present
 	if m.err != nil {
 		errorStyle := lipgloss.NewStyle().Foreground(lipgloss.Color("196")).Margin(1, 2)
-		return errorStyle.Render(fmt.Sprintf("Error: %v\nPress q to quit", m.err))
+		errorMsg := fmt.Sprintf("Error: %v\n\nPress ← to go back or q to quit", m.err)
+		return errorStyle.Render(errorMsg)
 	}
 
 	enter := key.NewBinding(
