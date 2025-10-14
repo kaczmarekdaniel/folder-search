@@ -51,7 +51,7 @@ func TestSearch_EmptyDirectory(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -85,7 +85,7 @@ func TestSearch_WithSubdirectories(t *testing.T) {
 		}
 	}
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -122,8 +122,8 @@ func TestSearch_CaseSensitive(t *testing.T) {
 	}
 	defer os.RemoveAll(tempDir)
 
-	// Create directories with different cases
-	testDirs := []string{"TestDir", "testdir", "TESTDIR"}
+	// Create directories with different names (works on case-insensitive filesystems)
+	testDirs := []string{"TestFolder", "testing", "TEMPORARY"}
 	for _, dir := range testDirs {
 		if err := os.Mkdir(filepath.Join(tempDir, dir), 0755); err != nil {
 			t.Fatalf("failed to create test dir %s: %v", dir, err)
@@ -131,7 +131,7 @@ func TestSearch_CaseSensitive(t *testing.T) {
 	}
 
 	t.Run("case-insensitive", func(t *testing.T) {
-		opts := &DirSearchOptions{
+		opts := &Options{
 			SearchPattern:  "test",
 			StartDir:       tempDir,
 			CaseSensitive:  false,
@@ -144,14 +144,14 @@ func TestSearch_CaseSensitive(t *testing.T) {
 			t.Errorf("unexpected error: %v", result.Error)
 		}
 
-		// Should match all three directories
-		if len(result.Directories) != 3 {
-			t.Errorf("expected 3 directories with case-insensitive search, got %d", len(result.Directories))
+		// Should match TestFolder and testing (both contain "test" case-insensitive)
+		if len(result.Directories) != 2 {
+			t.Errorf("expected 2 directories with case-insensitive search, got %d", len(result.Directories))
 		}
 	})
 
 	t.Run("case-sensitive", func(t *testing.T) {
-		opts := &DirSearchOptions{
+		opts := &Options{
 			SearchPattern:  "Test",
 			StartDir:       tempDir,
 			CaseSensitive:  true,
@@ -164,13 +164,13 @@ func TestSearch_CaseSensitive(t *testing.T) {
 			t.Errorf("unexpected error: %v", result.Error)
 		}
 
-		// Should only match "TestDir"
+		// Should only match "TestFolder" (contains "Test" with exact case)
 		if len(result.Directories) != 1 {
 			t.Errorf("expected 1 directory with case-sensitive search, got %d", len(result.Directories))
 		}
 
-		if len(result.Directories) > 0 && result.Directories[0] != "TestDir" {
-			t.Errorf("expected to find 'TestDir', got %q", result.Directories[0])
+		if len(result.Directories) > 0 && result.Directories[0] != "TestFolder" {
+			t.Errorf("expected to find 'TestFolder', got %q", result.Directories[0])
 		}
 	})
 }
@@ -190,7 +190,7 @@ func TestSearch_IgnorePatterns(t *testing.T) {
 		}
 	}
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -231,7 +231,7 @@ func TestSearch_GitDirectoriesIgnored(t *testing.T) {
 		}
 	}
 
-	opts := &DirSearchOptions{
+	opts := &Options{
 		SearchPattern:  "",
 		StartDir:       tempDir,
 		CaseSensitive:  false,
@@ -280,3 +280,4 @@ func TestScanDirs(t *testing.T) {
 		t.Errorf("expected StartDir to be updated to %q, got %q", tempDir, ds.Options.StartDir)
 	}
 }
+

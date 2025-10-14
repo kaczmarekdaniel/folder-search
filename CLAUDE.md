@@ -49,7 +49,7 @@ The UI uses a channel-based architecture for non-blocking directory scans:
 - `requestChan`: Sends directory paths to scan
 - `resultChan`: Receives `dirsearch.Result` with found directories
 - `scanInBackground()` goroutine processes scan requests continuously
-- `waitForResults()` returns a Bubble Tea command that waits for results
+- `waitForResults()` blocks until results are available from the result channel
 
 **UI Event Loop** (internal/ui/ui.go:109):
 The `Update()` method handles:
