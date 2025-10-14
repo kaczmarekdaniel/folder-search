@@ -280,4 +280,3 @@ func TestScanDirs(t *testing.T) {
 		t.Errorf("expected StartDir to be updated to %q, got %q", tempDir, ds.Options.StartDir)
 	}
 }
-

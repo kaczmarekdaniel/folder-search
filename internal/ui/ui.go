@@ -243,11 +243,11 @@ func (m model) View() string {
 // InitUI initializes and runs the terminal user interface.
 //
 // This function:
-//   1. Performs an initial directory scan of the current directory
-//   2. Sets up the Bubble Tea list component with the results
-//   3. Creates background goroutines for async directory scanning
-//   4. Starts the Bubble Tea event loop
-//   5. Blocks until the user quits the application
+//  1. Performs an initial directory scan of the current directory
+//  2. Sets up the Bubble Tea list component with the results
+//  3. Creates background goroutines for async directory scanning
+//  4. Starts the Bubble Tea event loop
+//  5. Blocks until the user quits the application
 //
 // The UI provides keyboard controls for navigation:
 //   - Up/Down or j/k: Navigate through directories
