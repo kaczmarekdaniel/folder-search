@@ -106,7 +106,7 @@ func DefaultOptions() *Options {
 //
 // Returns a Result with matching directories or an error.
 func Search(opts *Options) Result {
-	var foundDirs []string
+	foundDirs := []string{}
 	var searchErr error
 	// Prepare pattern for search
 	var pattern string
