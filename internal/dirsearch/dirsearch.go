@@ -8,7 +8,6 @@ package dirsearch
 import (
 	"fmt"
 	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 )
@@ -90,7 +89,7 @@ func DefaultOptions() *Options {
 
 // Search performs a directory search with the given options.
 //
-// It recursively traverses the directory tree starting from opts.StartDir,
+// It reads only the immediate child directories of opts.StartDir,
 // applying the following rules:
 //   - Skips .git directories automatically
 //   - Skips directories matching patterns in opts.IgnorePatterns
@@ -98,8 +97,8 @@ func DefaultOptions() *Options {
 //   - Returns only direct child directories (not nested subdirectories)
 //   - Returns relative paths from opts.StartDir
 //
-// The function uses filepath.WalkDir for efficient directory traversal.
-// Errors during traversal are skipped with filepath.SkipDir.
+// The function uses os.ReadDir for non-recursive, efficient directory reading.
+// Permission errors and other read errors are silently skipped.
 //
 // Parameters:
 //   - opts: configuration options for the search
@@ -107,7 +106,7 @@ func DefaultOptions() *Options {
 // Returns a Result with matching directories or an error.
 func Search(opts *Options) Result {
 	foundDirs := []string{}
-	var searchErr error
+
 	// Prepare pattern for search
 	var pattern string
 	if opts.CaseSensitive {
@@ -118,59 +117,52 @@ func Search(opts *Options) Result {
 
 	nameProvided := opts.SearchPattern != ""
 
-	// Walk through all directories
-	searchErr = filepath.WalkDir(opts.StartDir, func(path string, info os.DirEntry, err error) error {
-		if err != nil {
-			return filepath.SkipDir
+	// Read only immediate children (non-recursive)
+	entries, err := os.ReadDir(opts.StartDir)
+	if err != nil {
+		return Result{
+			Directories: foundDirs,
+			Error:       err,
+		}
+	}
+
+	// Process each entry
+	for _, entry := range entries {
+		// Skip non-directories
+		if !entry.IsDir() {
+			continue
 		}
 
-		if info.IsDir() {
-			matched := strings.HasPrefix(info.Name(), ".git")
+		name := entry.Name()
 
-			if matched {
-				return filepath.SkipDir
-			}
-
-			if slices.Contains(opts.IgnorePatterns, info.Name()) {
-				return filepath.SkipDir
-			}
+		// Skip .git directories
+		if strings.HasPrefix(name, ".git") {
+			continue
 		}
 
-		// If it's a directory and matches our pattern (if provided)
-		if info.IsDir() {
-			var matches bool
-			if !nameProvided {
-				matches = true
-			} else if opts.CaseSensitive {
-				matches = strings.Contains(info.Name(), pattern)
-			} else {
-				matches = strings.Contains(strings.ToLower(info.Name()), pattern)
-			}
-
-			if matches {
-				relativePath, err := filepath.Rel(opts.StartDir, path)
-				if err != nil {
-					relativePath = path
-				}
-				if relativePath == "." {
-					return nil
-				}
-
-				if strings.Contains(relativePath, "/") {
-					return nil
-				}
-
-				// Add to our slice
-				foundDirs = append(foundDirs, relativePath)
-			}
+		// Skip directories in ignore patterns
+		if slices.Contains(opts.IgnorePatterns, name) {
+			continue
 		}
 
-		return nil
-	})
+		// Check if it matches the search pattern
+		var matches bool
+		if !nameProvided {
+			matches = true
+		} else if opts.CaseSensitive {
+			matches = strings.Contains(name, pattern)
+		} else {
+			matches = strings.Contains(strings.ToLower(name), pattern)
+		}
+
+		if matches {
+			foundDirs = append(foundDirs, name)
+		}
+	}
 
 	return Result{
 		Directories: foundDirs,
-		Error:       searchErr,
+		Error:       nil,
 	}
 }
 
