@@ -132,6 +132,30 @@ func waitForResults(resultChan chan dirsearch.Result) tea.Cmd {
 	}
 }
 
+// checkDirPermission checks if the user has permission to access the given directory.
+// It attempts to read the directory to verify access permissions.
+//
+// Parameters:
+//   - dir: the directory path to check
+//
+// Returns:
+//   - error: nil if directory is accessible, permission error otherwise
+func checkDirPermission(dir string) error {
+	file, err := os.Open(dir)
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// Try to read one entry to verify we have read permissions
+	_, err = file.Readdirnames(1)
+	if err != nil && err != io.EOF {
+		return err
+	}
+
+	return nil
+}
+
 func (m model) Init() tea.Cmd {
 	m.requestChan <- m.currentDir
 	return waitForResults(m.resultChan)
@@ -161,6 +185,20 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			return m, tea.Quit
 		case "left":
 			parentDir := filepath.Dir(m.currentDir)
+
+			// Check if we have permission to access the parent directory
+			if err := checkDirPermission(parentDir); err != nil {
+				m.logger.Warn("parent directory access error", "dir", parentDir, "error", err)
+				if os.IsPermission(err) {
+					m.err = fmt.Errorf("permission denied: cannot access parent directory")
+				} else if os.IsNotExist(err) {
+					m.err = fmt.Errorf("parent directory not found")
+				} else {
+					m.err = fmt.Errorf("cannot access parent directory: %v", err)
+				}
+				return m, nil
+			}
+
 			m.currentDir = parentDir
 			m.logger.Debug("navigating to parent directory", "dir", m.currentDir)
 			m.err = nil
@@ -169,7 +207,22 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		case "right":
 			if m.err == nil {
 				i, _ := m.list.SelectedItem().(item)
-				m.currentDir = m.currentDir + "/" + string(i)
+				targetDir := filepath.Join(m.currentDir, string(i))
+
+				// Check if we have permission to access the target directory
+				if err := checkDirPermission(targetDir); err != nil {
+					m.logger.Warn("directory access error", "dir", targetDir, "error", err)
+					if os.IsPermission(err) {
+						m.err = fmt.Errorf("permission denied: cannot access '%s'", string(i))
+					} else if os.IsNotExist(err) {
+						m.err = fmt.Errorf("directory not found: '%s'", string(i))
+					} else {
+						m.err = fmt.Errorf("cannot access '%s': %v", string(i), err)
+					}
+					return m, nil
+				}
+
+				m.currentDir = targetDir
 				m.logger.Debug("navigating into directory", "dir", m.currentDir)
 				m.requestChan <- m.currentDir
 				return m, waitForResults(m.resultChan)
