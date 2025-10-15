@@ -67,6 +67,7 @@ type model struct {
 	currentDir  string
 	err         error
 	logger      *slog.Logger
+	dirIndexMap map[string]int // Stores cursor position for each directory
 }
 
 type responseMsg struct {
@@ -199,6 +200,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 				return m, nil
 			}
 
+			// Save current index before leaving
+			m.dirIndexMap[m.currentDir] = m.list.Index()
+
 			m.currentDir = parentDir
 			m.logger.Debug("navigating to parent directory", "dir", m.currentDir)
 			m.err = nil
@@ -221,6 +225,9 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 					}
 					return m, nil
 				}
+
+				// Save current index before leaving
+				m.dirIndexMap[m.currentDir] = m.list.Index()
 
 				m.currentDir = targetDir
 				m.logger.Debug("navigating into directory", "dir", m.currentDir)
@@ -246,6 +253,16 @@ func (m model) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.list.SetItems(stringsToItems(result.Directories))
 			height := int(math.Min(float64(len(result.Directories)+listHeightPadding), maxDynamicListHeight))
 			m.list.SetHeight(height)
+
+			// Restore cursor position if we have a saved index for this directory
+			if savedIndex, exists := m.dirIndexMap[m.currentDir]; exists && savedIndex < len(result.Directories) {
+				m.list.Select(savedIndex)
+				m.logger.Debug("restored cursor position", "dir", m.currentDir, "index", savedIndex)
+			} else {
+				// Default to first item
+				m.list.Select(0)
+				m.logger.Debug("reset cursor to first item", "dir", m.currentDir)
+			}
 		}
 		return m, nil
 	}
@@ -356,6 +373,7 @@ func InitUI(app *app.Application) error {
 		doneChan:    doneChan,
 		search:      app.Dirsearch.ScanDirs,
 		logger:      app.Logger,
+		dirIndexMap: make(map[string]int),
 	}
 
 	app.Logger.Info("starting UI event loop")
